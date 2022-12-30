@@ -15,6 +15,12 @@
 #define BACKLOG_SIZE 5
 #define SERVER_PORT 1235
 
+struct ExecData
+{
+  char *script;
+  int fd;
+};
+
 int main(int argc, char **argv)
 {
   fd_set readfds, writefds, nextReadFds, getScriptsListFds, getScriptResultFds;
@@ -48,7 +54,6 @@ int main(int argc, char **argv)
   }
 
   listen(serverFd, BACKLOG_SIZE);
-  // 150.254.32.67
 
   FD_ZERO(&readfds);
   FD_ZERO(&writefds);
@@ -57,6 +62,8 @@ int main(int argc, char **argv)
   FD_ZERO(&getScriptsListFds);
   FD_ZERO(&getScriptResultFds);
   maxFd = serverFd;
+
+  struct ExecData execData = {"", -1};
 
   printf("Start\n");
 
@@ -138,37 +145,82 @@ int main(int argc, char **argv)
             } while (sentCount < len);
           }
 
-          // if(pid == 0) {
-          //   dup2(i, 1);
-          //   char *command = "ls";
-          //   char *args[] = {command, "*.py", "-1", NULL};
-          //   execvp(command, args);
-          //   exit(1);
-          // } else {
-          //   int status, num_bytes;
-          //   waitpid(pid, &status, 0);
-          // }
-
-          // int sentCount = 0;
-          // do {
-          //     sentCount = write(i, r, strlen(r));
-          //     r += sentCount;
-          // } while(sentCount < len);
-
           FD_CLR(i, &getScriptsListFds);
         }
         else if (FD_ISSET(i, &getScriptResultFds))
         {
-          char *r = "Wiktor Szymanski\n";
-          int len = strlen(r);
-
-          int sentCount = 0;
-          do
+          if (execData.fd != i)
           {
-            int temp = write(i, r + sentCount, strlen(r));
-            r += temp;
-            sentCount += temp;
-          } while (sentCount < len);
+            continue;
+          }
+          printf("\e[32m[EXEC]\e[0m: %s\t\e[32m[FD]\e[0m: %d\n\n", execData.script, execData.fd);
+          int len = 0;
+
+          int fd[2];
+          pipe(fd);
+          pid_t pid = fork();
+
+          if (pid == 0)
+          {
+            char scriptname[512] = "./scripts/";
+            close(fd[0]);
+            dup2(fd[1], 1);
+
+            char *execArgs[512] = {NULL};
+            execArgs[0] = "python3";
+
+            char *token = strtok(execData.script, " ");
+
+            if (token != NULL)
+            {
+
+              strcat(scriptname, token);
+            }
+            else
+            {
+              strcat(scriptname, execData.script);
+            }
+
+            execArgs[1] = scriptname;
+
+            for (int i = 2; i < 512 && token != NULL; i++)
+            {
+              token = strtok(NULL, " ");
+              if (token != NULL)
+              {
+                execArgs[i] = malloc(sizeof(char) * strlen(token));
+                strcpy(execArgs[i], token);
+              }
+            }
+
+            execvp(execArgs[0], execArgs);
+
+            close(fd[1]);
+          }
+          else
+          {
+            close(fd[1]);
+            dup2(fd[0], 0);
+
+            int status, num_bytes;
+            waitpid(pid, &status, 0);
+
+            char *output_str = malloc(sizeof(char) * 5120);
+
+            while ((num_bytes = read(fd[0], output_str, 5120)) > 0)
+            {
+              len += num_bytes;
+            }
+
+            close(fd[0]);
+            int sentCount = 0;
+            do
+            {
+              int temp = write(i, output_str, strlen(output_str));
+              sentCount += temp;
+              output_str += temp;
+            } while (sentCount < len);
+          }
 
           FD_CLR(i, &getScriptResultFds);
         }
@@ -213,10 +265,12 @@ int main(int argc, char **argv)
         {
           FD_SET(i, &getScriptsListFds);
         }
-        // else if (strncmp(buffer, "148084", 6) == 0)
-        // {
-        //     FD_SET(i, &getScriptResultFds);
-        // }
+        else if (strncmp(data, "EXEC", 4) == 0)
+        {
+          struct ExecData temp = {data + 5, i};
+          execData = temp;
+          FD_SET(i, &getScriptResultFds);
+        }
 
         FD_SET(i, &writefds);
         FD_CLR(i, &readfds);

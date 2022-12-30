@@ -59,7 +59,7 @@ int main(int argc, char *argv[])
 
   // while (1)
   // {
-    request(argv[1], atoi(argv[2]), "GET_SCRIPTS");
+    request(argv[1], atoi(argv[2]), argv[3]);
   // }
 
   return 0;
