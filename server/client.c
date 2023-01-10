@@ -21,8 +21,6 @@ void request(char *addres, int port, char *index)
   addr.sin_port = htons(port);
   memcpy(&addr.sin_addr.s_addr, addrent->h_addr, addrent->h_length);
 
-  char buf[512];
-
   if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != -1)
   {
     char *msg = malloc(sizeof(char) * 512);
@@ -38,13 +36,24 @@ void request(char *addres, int port, char *index)
     } while (sentCount < msgSize);
 
     int readCount = 0;
+    char buffer[512];
     do
     {
-      int temp = read(fd, buf + readCount, sizeof(buf));
+      int temp = read(fd, buffer + readCount, 1);
       readCount += temp;
-    } while (buf[readCount - 1] != '\n');
+    } while (buffer[readCount - 1] != '\n');
 
-    printf("%s\n", buf);
+    int dataSize = atoi(buffer);
+    char *data = malloc(sizeof(char) * dataSize + 1);
+    data[dataSize] = '\0';
+    int dataReadCount = 0;
+    do
+    {
+      int temp = read(fd, data + dataReadCount, dataSize);
+      dataReadCount += temp;
+    } while (dataReadCount < dataSize);
+
+    printf("%s\n", data);
   }
   close(fd);
 }
@@ -59,7 +68,7 @@ int main(int argc, char *argv[])
 
   // while (1)
   // {
-    request(argv[1], atoi(argv[2]), argv[3]);
+  request(argv[1], atoi(argv[2]), argv[3]);
   // }
 
   return 0;

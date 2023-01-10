@@ -15,8 +15,8 @@
 #define BACKLOG_SIZE 5
 #define SERVER_PORT 1235
 #define MAX_CONNECTIONS 1000
-
-void print_start_message();
+#define connection_header_eof '\n'
+#define script_result_BUFFER_SIZE 5120
 
 struct Connection
 {
@@ -24,330 +24,341 @@ struct Connection
   char *command;
 };
 
+struct Connection connections[MAX_CONNECTIONS];
+
+void print_start_message();
+void send_response(int fd, char *message);
+char *read_request(int fd);
+char *get_available_scripts_list();
+char *get_script_result(char *command);
+int get_connection_id(int fd);
+
 int main(int argc, char **argv)
 {
   print_start_message();
 
-  fd_set readfds, writefds, nextReadFds, getScriptsListFds, getScriptResultFds;
+  fd_set read_fds, write_fds, next_read_fds;
+
   struct timeval timeout;
-  socklen_t clientSocketLength;
-  struct sockaddr_in serverAddress, clientAddress;
+  socklen_t client_socket_length;
+  struct sockaddr_in server_address, client_address;
 
-  struct Connection connections[MAX_CONNECTIONS];
+  int server_fd = socket(PF_INET, SOCK_STREAM, 0);
+  int client_fd, fd_count, on = 1, max_fd = server_fd;
 
-  char eofs = '\n';
+  setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&on, sizeof(on));
 
-  int serverFd = socket(PF_INET, SOCK_STREAM, 0),
-      clientFd,
-      on = 1,
-      maxFd = serverFd,
-      fdCount;
+  server_address.sin_family = PF_INET;
+  server_address.sin_addr.s_addr = INADDR_ANY;
+  server_address.sin_port = htons(SERVER_PORT);
 
-  char buffer[BUFFER_SIZE];
-  char errorMessage[BUFFER_SIZE] = "\e[31mERROR\e[0m";
-
-  setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, (char *)&on, sizeof(on));
-
-  serverAddress.sin_family = PF_INET;
-  serverAddress.sin_addr.s_addr = INADDR_ANY;
-  serverAddress.sin_port = htons(SERVER_PORT);
-
-  int isPortAlreadyTaken = -1 == bind(serverFd, (struct sockaddr *)&serverAddress, sizeof(serverAddress));
+  int isPortAlreadyTaken = -1 == bind(server_fd, (struct sockaddr *)&server_address, sizeof(server_address));
 
   if (isPortAlreadyTaken)
   {
-    printf("\e[31m[ERROR]\e[0m: Couldn't open socket.\n");
+    printf("[ERROR]: Couldn't open socket.\n");
     return EXIT_FAILURE;
   }
 
-  listen(serverFd, BACKLOG_SIZE);
+  listen(server_fd, BACKLOG_SIZE);
 
-  FD_ZERO(&readfds);
-  FD_ZERO(&writefds);
-  FD_ZERO(&nextReadFds);
+  FD_ZERO(&read_fds);
+  FD_ZERO(&write_fds);
+  FD_ZERO(&next_read_fds);
 
-  FD_ZERO(&getScriptsListFds);
-  FD_ZERO(&getScriptResultFds);
-  maxFd = serverFd;
-
-  printf("\e[32mStarted listening on: %s:%d\e[0m\n\n", inet_ntoa((struct in_addr)clientAddress.sin_addr), SERVER_PORT);
+  max_fd = server_fd;
 
   while (1)
   {
-    readfds = nextReadFds;
-    FD_SET(serverFd, &readfds);
+    read_fds = next_read_fds;
+    FD_SET(server_fd, &read_fds);
     timeout.tv_sec = 5 * 60;
     timeout.tv_usec = 0;
 
-    fdCount = select(maxFd + 1, &readfds, &writefds, (fd_set *)0, &timeout);
+    fd_count = select(max_fd + 1, &read_fds, &write_fds, (fd_set *)0, &timeout);
 
-    if (fdCount == 0)
+    if (fd_count == 0)
     {
-      printf("\e[34m[TIMEOUT]\e[0m\n");
+      printf("[TIMEOUT]\n");
       continue;
     }
 
-    if (FD_ISSET(serverFd, &readfds))
+    if (FD_ISSET(server_fd, &read_fds))
     {
-      fdCount -= 1;
-      clientSocketLength = sizeof(clientAddress);
+      fd_count -= 1;
+      client_socket_length = sizeof(client_address);
 
-      clientFd = accept(serverFd, (struct sockaddr *)&clientAddress, &clientSocketLength);
+      client_fd = accept(server_fd, (struct sockaddr *)&client_address, &client_socket_length);
 
-      FD_SET(clientFd, &nextReadFds);
+      FD_SET(client_fd, &next_read_fds);
 
-      printf("\e[32m[FD]\e[0m: %d\t\e[32m[CONNECTED]\e[0m: %s\n", clientFd, inet_ntoa((struct in_addr)clientAddress.sin_addr));
+      printf("[FD]: %d\t[CONNECTED]: %s\n", client_fd, inet_ntoa((struct in_addr)client_address.sin_addr));
 
       for (int i = 0; i < MAX_CONNECTIONS; i++)
       {
         if (connections[i].fd == 0)
         {
-          connections[i].fd = clientFd;
+          connections[i].fd = client_fd;
           break;
         }
       }
 
-      if (clientFd > maxFd)
-        maxFd = clientFd;
+      if (client_fd > max_fd)
+      {
+        max_fd = client_fd;
+      }
     }
 
-    for (int i = serverFd + 1; i <= maxFd && fdCount > 0; i++)
+    for (int current_fd = server_fd + 1; current_fd <= max_fd && fd_count > 0; current_fd++)
     {
-      if (FD_ISSET(i, &writefds))
+      if (FD_ISSET(current_fd, &write_fds))
       {
-        fdCount -= 1;
+        fd_count -= 1;
 
-        int connectionId = 0;
+        int connectionId = get_connection_id(current_fd);
 
-        for (; connectionId < MAX_CONNECTIONS; connectionId++)
+        if (connectionId == -1)
         {
-          if (connections[connectionId].fd == i)
-          {
-            break;
-          }
-        }
-
-        if (connectionId >= MAX_CONNECTIONS)
-        {
-          printf("\e[32m[FD]\e[0m: %d\t\e[31m[ERROR]\e[0m: Not found connection in connections table\n\n", i);
-          continue;
-        }
-
-        if (connectionId < MAX_CONNECTIONS)
-        {
-
-          if (FD_ISSET(i, &getScriptsListFds))
-          {
-            int len = 0;
-
-            int fd[2];
-            pipe(fd);
-            pid_t pid = fork();
-
-            if (pid == 0)
-            {
-              close(fd[0]);
-              dup2(fd[1], 1);
-              char *command = "ls";
-              char *execArgs[] = {command, "./scripts", "-1", NULL};
-              execvp(command, execArgs);
-              close(fd[1]);
-            }
-            else
-            {
-              close(fd[1]);
-              dup2(fd[0], 0);
-
-              int status, num_bytes;
-              waitpid(pid, &status, 0);
-
-              char *output_str = malloc(sizeof(char) * BUFFER_SIZE);
-
-              while ((num_bytes = read(fd[0], output_str, BUFFER_SIZE)) > 0)
-              {
-                len += num_bytes;
-              }
-
-              close(fd[0]);
-              int sentCount = 0;
-              do
-              {
-                int temp = write(i, output_str, strlen(output_str));
-                sentCount += temp;
-                output_str += temp;
-              } while (sentCount < len);
-
-              free(output_str);
-            }
-
-            FD_CLR(i, &getScriptsListFds);
-          }
-          else if (FD_ISSET(i, &getScriptResultFds))
-          {
-
-            printf("\e[32m[FD]\e[0m: %d\t\e[32m[EXEC]\e[0m: %s\n\n", connections[connectionId].fd, connections[connectionId].command);
-            int len = 0;
-
-            int fd[2];
-            pipe(fd);
-            pid_t pid = fork();
-
-            if (pid == 0)
-            {
-              char scriptname[512] = "./scripts/";
-              close(fd[0]);
-              dup2(fd[1], 1);
-
-              char *execArgs[512] = {NULL};
-              execArgs[0] = "python3";
-
-              char *token = strtok(connections[connectionId].command, " ");
-
-              if (token != NULL)
-              {
-
-                strcat(scriptname, token);
-              }
-              else
-              {
-                strcat(scriptname, connections[connectionId].command);
-              }
-
-              execArgs[1] = scriptname;
-
-              for (int i = 2; i < 512 && token != NULL; i++)
-              {
-                token = strtok(NULL, " ");
-                if (token != NULL)
-                {
-                  execArgs[i] = malloc(sizeof(char) * strlen(token));
-                  strcpy(execArgs[i], token);
-                }
-              }
-
-              execvp(execArgs[0], execArgs);
-
-              close(fd[1]);
-            }
-            else
-            {
-              close(fd[1]);
-              dup2(fd[0], 0);
-
-              int status, num_bytes;
-              waitpid(pid, &status, 0);
-
-              char *output_str = malloc(sizeof(char) * 5120);
-
-              while ((num_bytes = read(fd[0], output_str, 5120)) > 0)
-              {
-                len += num_bytes;
-              }
-
-              close(fd[0]);
-              int sentCount = 0;
-              do
-              {
-                int temp = write(i, output_str, strlen(output_str));
-                sentCount += temp;
-                output_str += temp;
-              } while (sentCount < len);
-            }
-
-            FD_CLR(i, &getScriptResultFds);
-          }
-          else
-          {
-            write(i, errorMessage, BUFFER_SIZE);
-          }
-
-          connections[connectionId].fd = 0;
+          printf("[FD]: %d\t[ERROR]: Not found connection in connections table\n\n", current_fd);
+          send_response(current_fd, "Internal server error\n");
         }
         else
         {
-          write(i, errorMessage, BUFFER_SIZE);
+          if (strncmp(connections[connectionId].command, "GET_SCRIPTS", 11) == 0)
+          {
+            send_response(current_fd, get_available_scripts_list());
+          }
+          else if (strncmp(connections[connectionId].command, "EXEC ", 5) == 0)
+          {
+            send_response(current_fd, get_script_result(connections[connectionId].command + 5));
+          }
+          else
+          {
+            send_response(current_fd, "Command doesn't exist\n");
+          }
+
+          connections[connectionId].fd = 0;
+          free(connections[connectionId].command);
         }
 
-        close(i);
+        close(current_fd);
 
-        FD_CLR(i, &writefds);
+        FD_CLR(current_fd, &write_fds);
 
-        if (i == maxFd)
-          while (maxFd > clientFd && !FD_ISSET(maxFd, &nextReadFds) && !FD_ISSET(maxFd, &writefds))
-            maxFd--;
+        if (current_fd == max_fd)
+        {
+          while (max_fd > client_fd && !FD_ISSET(max_fd, &next_read_fds) && !FD_ISSET(max_fd, &write_fds))
+          {
+            max_fd--;
+          }
+        }
       }
-      else if (FD_ISSET(i, &readfds))
+      else if (FD_ISSET(current_fd, &read_fds))
       {
-        fdCount -= 1;
-        FD_CLR(i, &nextReadFds);
+        fd_count -= 1;
+        FD_CLR(current_fd, &next_read_fds);
 
-        int readCount = 0;
-        do
+        int connectionId = get_connection_id(current_fd);
+
+        if (connectionId != -1)
         {
-          int temp = read(i, buffer + readCount, 1);
-          readCount += temp;
-        } while (buffer[readCount - 1] != eofs);
-
-        int dataSize = atoi(buffer);
-        char *data = malloc(sizeof(char) * dataSize + 1);
-        data[dataSize] = '\0';
-        int dataReadCount = 0;
-        do
-        {
-          int temp = read(i, data + dataReadCount, dataSize);
-          dataReadCount += temp;
-        } while (dataReadCount < dataSize);
-
-        printf("\e[32m[FD]\e[0m: %d\t\e[32m[MESSAGE]\e[0m: %s\n", i, data);
-
-        if (strncmp(data, "GET_SCRIPTS", 11) == 0)
-        {
-          FD_SET(i, &getScriptsListFds);
-        }
-        else if (strncmp(data, "EXEC", 4) == 0)
-        {
-          int connectionId = 0;
-          for (; connectionId < MAX_CONNECTIONS; connectionId++)
-          {
-            if (connections[connectionId].fd == i)
-            {
-              break;
-            }
-          }
-
-          if (connectionId < MAX_CONNECTIONS)
-          {
-            connections[connectionId].command = data + 5;
-          }
-
-          FD_SET(i, &getScriptResultFds);
+          connections[connectionId].command = read_request(current_fd);
         }
 
-        FD_SET(i, &writefds);
-        FD_CLR(i, &readfds);
+        FD_SET(current_fd, &write_fds);
+        FD_CLR(current_fd, &read_fds);
       }
     }
   }
 
-  close(serverFd);
+  close(server_fd);
 
   return EXIT_SUCCESS;
+}
+
+char *read_request(int fd)
+{
+  char buffer[BUFFER_SIZE];
+
+  int readCount = 0;
+  do
+  {
+    int temp = read(fd, buffer + readCount, 1);
+    readCount += temp;
+  } while (buffer[readCount - 1] != connection_header_eof);
+
+  int dataSize = atoi(buffer);
+  char *data = malloc(sizeof(char) * dataSize + 1);
+  data[dataSize] = '\0';
+  int dataReadCount = 0;
+  do
+  {
+    int temp = read(fd, data + dataReadCount, dataSize);
+    dataReadCount += temp;
+  } while (dataReadCount < dataSize);
+
+  printf("[FD]: %d\t[REQUEST_MESSAGE]: %s\n", fd, data);
+
+  return data;
+}
+
+void send_response(int fd, char *message)
+{
+  int messageSize = strlen(message);
+
+  int bodySize = snprintf(NULL, 0, "%d\n%s", messageSize, message);
+  char *str = malloc(sizeof(char) * (bodySize + 1));
+  snprintf(str, bodySize + 1, "%d\n%s", messageSize, message);
+
+  printf("[FD]: %d\t[RESPONSE_MESSAGE]: %s\n", fd, str);
+
+  int sentCount = 0;
+  do
+  {
+    int temp = write(fd, str, strlen(str));
+    sentCount += temp;
+    str += temp;
+  } while (sentCount < bodySize);
+}
+
+char *get_script_result(char *command)
+{
+  int fd[2];
+
+  pipe(fd);
+
+  pid_t pid = fork();
+
+  if (pid == 0)
+  {
+    char script_path[BUFFER_SIZE] = "./scripts/";
+
+    close(fd[0]);
+    dup2(fd[1], 1);
+    dup2(fd[1], STDERR_FILENO);
+
+    char *exec_args[BUFFER_SIZE] = {NULL};
+    exec_args[0] = "python3";
+
+    char *token = strtok(command, " ");
+
+    if (token != NULL)
+    {
+      strcat(script_path, token);
+    }
+    else
+    {
+      strcat(script_path, command);
+    }
+
+    exec_args[1] = script_path;
+
+    for (int i = 2; i < BUFFER_SIZE && token != NULL; i++)
+    {
+      token = strtok(NULL, " ");
+      if (token != NULL)
+      {
+        exec_args[i] = malloc(sizeof(char) * strlen(token));
+        strcpy(exec_args[i], token);
+      }
+    }
+
+    execvp(exec_args[0], exec_args);
+
+    close(fd[1]);
+
+    return "";
+  }
+  else
+  {
+    close(fd[1]);
+    dup2(fd[0], 0);
+
+    int status;
+    waitpid(pid, &status, 0);
+
+    char *output_str = malloc(sizeof(char) * script_result_BUFFER_SIZE);
+
+    read(fd[0], output_str, script_result_BUFFER_SIZE);
+    close(fd[0]);
+
+    if (strstr(output_str, "Errno 2") != NULL)
+    {
+      return strstr(output_str, "[Errno 2] ") + 10;
+    }
+
+    return output_str;
+  }
+}
+
+char *get_available_scripts_list()
+{
+  int fd[2];
+
+  pipe(fd);
+
+  pid_t pid = fork();
+
+  if (pid == 0)
+  {
+    close(fd[0]);
+    dup2(fd[1], 1);
+    dup2(fd[1], STDERR_FILENO);
+
+    char *command = "ls";
+    char *exec_args[] = {command, "./scripts", "-1", NULL};
+
+    execvp(command, exec_args);
+    close(fd[1]);
+
+    return "";
+  }
+  else
+  {
+    close(fd[1]);
+    dup2(fd[0], 0);
+
+    int status;
+    waitpid(pid, &status, 0);
+
+    char *output_str = malloc(sizeof(char) * script_result_BUFFER_SIZE);
+
+    read(fd[0], output_str, script_result_BUFFER_SIZE);
+    close(fd[0]);
+
+    return output_str;
+  }
+}
+
+int get_connection_id(int fd)
+{
+  for (int i = 0; i < MAX_CONNECTIONS; i++)
+  {
+    if (connections[i].fd == fd)
+    {
+      return i;
+    }
+  }
+
+  return -1;
 }
 
 void print_start_message()
 {
   printf("===================================================================================================================================================\n");
-  printf("\e[33m                                 _                                                  _                                                              \n");
+  printf("                                 _                                                  _                                                              \n");
   printf("   _ __   ___  _ __ ___    ___  | |_   ___      _ __   _ __   ___    ___   ___   __| | _   _  _ __   ___      ___   ___  _ __ __   __  ___  _ __   \n");
   printf("  | '__| / _ \\| '_ ` _ \\  / _ \\ | __| / _ \\    | '_ \\ | '__| / _ \\  / __| / _ \\ / _` || | | || '__| / _ \\    / __| / _ \\| '__|\\ \\ / / / _ \\| '__|  \n");
   printf("  | |   |  __/| | | | | || (_) || |_ |  __/    | |_) || |   | (_) || (__ |  __/| (_| || |_| || |   |  __/    \\__ \\|  __/| |    \\ V / |  __/| |     \n");
   printf("  |_|    \\___||_| |_| |_| \\___/  \\__| \\___|    | .__/ |_|    \\___/  \\___| \\___| \\__,_| \\__,_||_|    \\___|    |___/ \\___||_|     \\_/   \\___||_|     \n");
   printf("                                               |_|                                                                                                 \n");
-  printf("                                                                                                                                                   \e[0m\n");
+  printf("                                                                                                                                                   \n");
   printf("===================================================================================================================================================\n");
   printf("Configuration:\n");
-  printf("\tMessage buffer size:\t%d\n", BUFFER_SIZE);
-  printf("\tQueue size:\t\t%d\n", BACKLOG_SIZE);
-  printf("\tMax connections:\t%d\n", MAX_CONNECTIONS);
+  printf("\tMessage buffer size:\t\t%d\n", BUFFER_SIZE);
+  printf("\tQueue size:\t\t\t%d\n", BACKLOG_SIZE);
+  printf("\tMax connections:\t\t%d\n", MAX_CONNECTIONS);
+  printf("\tScript result buffer size:\t%d\n", script_result_BUFFER_SIZE);
+  printf("\tServer port:\t\t\t%d\n", SERVER_PORT);
   printf("===================================================================================================================================================\n");
 }
