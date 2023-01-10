@@ -16,6 +16,8 @@
 #define SERVER_PORT 1235
 #define MAX_CONNECTIONS 1000
 
+void print_start_message();
+
 struct Connection
 {
   int fd;
@@ -24,6 +26,8 @@ struct Connection
 
 int main(int argc, char **argv)
 {
+  print_start_message();
+
   fd_set readfds, writefds, nextReadFds, getScriptsListFds, getScriptResultFds;
   struct timeval timeout;
   socklen_t clientSocketLength;
@@ -52,7 +56,7 @@ int main(int argc, char **argv)
 
   if (isPortAlreadyTaken)
   {
-    printf("Couldn't open socket.\n");
+    printf("\e[31m[ERROR]\e[0m: Couldn't open socket.\n");
     return EXIT_FAILURE;
   }
 
@@ -66,7 +70,7 @@ int main(int argc, char **argv)
   FD_ZERO(&getScriptResultFds);
   maxFd = serverFd;
 
-  printf("\e[33m=============== CONFIGURATION ===============\e[0m\n\e[33mListening on\e[0m: %s:%d\n\e[33mMax connections\e[0m: %d\n\e[33mQueue size\e[0m: %d\n\e[33m==================== LOG ====================\e[0m\n", inet_ntoa((struct in_addr)clientAddress.sin_addr), SERVER_PORT, MAX_CONNECTIONS, BACKLOG_SIZE);
+  printf("\e[32mStarted listening on: %s:%d\e[0m\n\n", inet_ntoa((struct in_addr)clientAddress.sin_addr), SERVER_PORT);
 
   while (1)
   {
@@ -157,9 +161,9 @@ int main(int argc, char **argv)
               int status, num_bytes;
               waitpid(pid, &status, 0);
 
-              char *output_str = malloc(sizeof(char) * 5120);
+              char *output_str = malloc(sizeof(char) * BUFFER_SIZE);
 
-              while ((num_bytes = read(fd[0], output_str, 5120)) > 0)
+              while ((num_bytes = read(fd[0], output_str, BUFFER_SIZE)) > 0)
               {
                 len += num_bytes;
               }
@@ -172,6 +176,8 @@ int main(int argc, char **argv)
                 sentCount += temp;
                 output_str += temp;
               } while (sentCount < len);
+
+              free(output_str);
             }
 
             FD_CLR(i, &getScriptsListFds);
@@ -326,4 +332,22 @@ int main(int argc, char **argv)
   close(serverFd);
 
   return EXIT_SUCCESS;
+}
+
+void print_start_message()
+{
+  printf("===================================================================================================================================================\n");
+  printf("\e[33m                                 _                                                  _                                                              \n");
+  printf("   _ __   ___  _ __ ___    ___  | |_   ___      _ __   _ __   ___    ___   ___   __| | _   _  _ __   ___      ___   ___  _ __ __   __  ___  _ __   \n");
+  printf("  | '__| / _ \\| '_ ` _ \\  / _ \\ | __| / _ \\    | '_ \\ | '__| / _ \\  / __| / _ \\ / _` || | | || '__| / _ \\    / __| / _ \\| '__|\\ \\ / / / _ \\| '__|  \n");
+  printf("  | |   |  __/| | | | | || (_) || |_ |  __/    | |_) || |   | (_) || (__ |  __/| (_| || |_| || |   |  __/    \\__ \\|  __/| |    \\ V / |  __/| |     \n");
+  printf("  |_|    \\___||_| |_| |_| \\___/  \\__| \\___|    | .__/ |_|    \\___/  \\___| \\___| \\__,_| \\__,_||_|    \\___|    |___/ \\___||_|     \\_/   \\___||_|     \n");
+  printf("                                               |_|                                                                                                 \n");
+  printf("                                                                                                                                                   \e[0m\n");
+  printf("===================================================================================================================================================\n");
+  printf("Configuration:\n");
+  printf("\tMessage buffer size:\t%d\n", BUFFER_SIZE);
+  printf("\tQueue size:\t\t%d\n", BACKLOG_SIZE);
+  printf("\tMax connections:\t%d\n", MAX_CONNECTIONS);
+  printf("===================================================================================================================================================\n");
 }
