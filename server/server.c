@@ -24,17 +24,43 @@ struct Connection
   char *command;
 };
 
-struct Connection connections[MAX_CONNECTIONS];
-
+/**
+ * Prints the project name and server configuration at STDOUT
+ */
 void print_start_message();
-void send_response(int fd, char *message);
-char *read_request(int fd);
+
+/**
+ * Sends content of the message to file with given file descriptor
+ * Response is formatted accordingly to communication protocol
+ */
+void send_response(int file_descriptor, char *message);
+
+/**
+ * Reads content of file with given file descriptor
+ * Expects content formatted accordingly to communication protocol
+ */
+char *read_request(int file_descriptor);
+
+/**
+ * Gets list of available python scripts from 'scripts' directory
+ */
 char *get_available_scripts_list();
+
+/**
+ * Executes python script with given name and arguments
+ * Expects string formatted 'file.py arg1 arg2'
+ */
 char *get_script_result(char *command);
-int get_connection_id(int fd);
+
+/**
+ * Gets index of connections where item is assigned to given file descriptor
+ */
+int get_connection_id(int file_descriptor, struct Connection *connections);
 
 int main(int argc, char **argv)
 {
+  struct Connection connections[MAX_CONNECTIONS];
+
   print_start_message();
 
   fd_set read_fds, write_fds, next_read_fds;
@@ -115,7 +141,7 @@ int main(int argc, char **argv)
       {
         fd_count -= 1;
 
-        int connectionId = get_connection_id(current_fd);
+        int connectionId = get_connection_id(current_fd, connections);
 
         if (connectionId == -1)
         {
@@ -158,7 +184,7 @@ int main(int argc, char **argv)
         fd_count -= 1;
         FD_CLR(current_fd, &next_read_fds);
 
-        int connectionId = get_connection_id(current_fd);
+        int connectionId = get_connection_id(current_fd, connections);
 
         if (connectionId != -1)
         {
@@ -330,7 +356,7 @@ char *get_available_scripts_list()
   }
 }
 
-int get_connection_id(int fd)
+int get_connection_id(int fd, struct Connection *connections)
 {
   for (int i = 0; i < MAX_CONNECTIONS; i++)
   {
