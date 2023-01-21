@@ -28,6 +28,10 @@ Plik `./server/server.c` zawiera implementację serwera w języku c. Serwer jest
 
 W celu uzyskania listy dostępnych proecdur, serwer wykonuje funkcję systemową `ls -1`. W celu wykonania procedur serwer uruchamia plik za pomocą interpretera (polecenie `python3`).
 
+### Klient
+
+Plik `./client/client.py` zawiera implementację klienta w języku python. Klient używa niskopoziomowego modułu `socket` w celu komunikacji z serwerem. Do wygenerowania GUI aplikacja używa biblioteki tkinter.
+
 ## Sposób kompilacji
 
 ### Serwer
@@ -36,8 +40,11 @@ W celu uzyskania listy dostępnych proecdur, serwer wykonuje funkcję systemową
 gcc -Wall ./server/server.c -o ./server.out
 ```
 
-### Klient
-
 ## Wymagania
 
 Serwer dla poprawnego działania potrzebuje mieć w ścieżce dostęp do interpretera języka python za pomocą polecenia `python3`.
+Klient do uruchomienia potrzebuje pythona 3.7 oraz zainstalowanej biblioteki tkinter.
+
+## Obsługa
+
+Uruchamiając klienta, można na wejściu linii poleceń podać adres oraz port serwera, np. `python3 ./client/client.py 127.0.0.1 1235".
