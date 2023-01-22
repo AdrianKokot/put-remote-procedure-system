@@ -47,4 +47,4 @@ Klient do uruchomienia potrzebuje pythona 3.7 oraz zainstalowanej biblioteki tki
 
 ## Obsługa
 
-Uruchamiając klienta, można na wejściu linii poleceń podać adres oraz port serwera, np. `python3 ./client/client.py 127.0.0.1 1235".
+Uruchamiając klienta, można na wejściu linii poleceń podać adres oraz port serwera, np. `python3 ./client/client.py 127.0.0.1 1235`.
